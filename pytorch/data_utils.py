@@ -180,7 +180,7 @@ class Corpus(object):
         self.dataset = dataset
         self.vocab = Vocab(*args, **kwargs)
 
-        if self.dataset in ['ptb', 'wt2', 'enwik8', 'text8']:
+        if self.dataset in ['ptb', 'wt2', 'enwik8', 'text8', 'dummy']:
             self.vocab.count_file(os.path.join(path, 'train.txt'))
             self.vocab.count_file(os.path.join(path, 'valid.txt'))
             self.vocab.count_file(os.path.join(path, 'test.txt'))
@@ -202,6 +202,13 @@ class Corpus(object):
                 os.path.join(path, 'valid.txt'), ordered=True)
             self.test  = self.vocab.encode_file(
                 os.path.join(path, 'test.txt'), ordered=True)
+        elif self.dataset == 'dummy':
+            self.train = self.vocab.encode_file(
+                os.path.join(path, 'train.txt'), ordered=False)
+            self.valid = self.vocab.encode_file(
+                os.path.join(path, 'valid.txt'), ordered=False)
+            self.test = self.vocab.encode_file(
+                os.path.join(path, 'test.txt'), ordered=False)
         elif self.dataset in ['enwik8', 'text8']:
             self.train = self.vocab.encode_file(
                 os.path.join(path, 'train.txt'), ordered=True, add_eos=False)
@@ -218,14 +225,14 @@ class Corpus(object):
 
     def get_iterator(self, split, *args, **kwargs):
         if split == 'train':
-            if self.dataset in ['ptb', 'wt2', 'wt103', 'enwik8', 'text8']:
+            if self.dataset in ['ptb', 'wt2', 'wt103', 'enwik8', 'text8', 'dummy']:
                 data_iter = LMOrderedIterator(self.train, *args, **kwargs)
             elif self.dataset == 'lm1b':
                 kwargs['shuffle'] = True
                 data_iter = LMMultiFileIterator(self.train, self.vocab, *args, **kwargs)
         elif split in ['valid', 'test']:
             data = self.valid if split == 'valid' else self.test
-            if self.dataset in ['ptb', 'wt2', 'wt103', 'enwik8', 'text8']:
+            if self.dataset in ['ptb', 'wt2', 'wt103', 'enwik8', 'text8','dummy']:
                 data_iter = LMOrderedIterator(data, *args, **kwargs)
             elif self.dataset == 'lm1b':
                 data_iter = LMShuffledIterator(data, *args, **kwargs)
@@ -241,7 +248,7 @@ def get_lm_corpus(datadir, dataset):
     else:
         print('Producing dataset {}...'.format(dataset))
         kwargs = {}
-        if dataset in ['wt103', 'wt2']:
+        if dataset in ['wt103', 'wt2', 'dummy']:
             kwargs['special'] = ['<eos>']
             kwargs['lower_case'] = False
         elif dataset == 'ptb':
@@ -265,7 +272,7 @@ if __name__ == '__main__':
     parser.add_argument('--datadir', type=str, default='../data/text8',
                         help='location of the data corpus')
     parser.add_argument('--dataset', type=str, default='text8',
-                        choices=['ptb', 'wt2', 'wt103', 'lm1b', 'enwik8', 'text8'],
+                        choices=['ptb', 'wt2', 'wt103', 'lm1b', 'enwik8', 'text8', 'dummy'],
                         help='dataset name')
     args = parser.parse_args()
 

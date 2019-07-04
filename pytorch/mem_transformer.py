@@ -411,6 +411,10 @@ class RelLearnableDecoderLayer(nn.Module):
         return output
 
 class RelPartialLearnableDecoderLayer(nn.Module):
+    """
+    actual implementation of one decoder layer in the model.
+    the model has n_layer of these
+    """
     def __init__(self, n_head, d_model, d_head, d_inner, dropout,
                  **kwargs):
         super(RelPartialLearnableDecoderLayer, self).__init__()
