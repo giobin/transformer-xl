@@ -158,11 +158,12 @@ class Corpus(object):
                 data_iter = LMOrderedIterator(data, *args, **kwargs)
             elif split == 'valid':
                 data = self.valid
-                data_iter = LMSimpleOrderedIterator(data, *args, **kwargs)
+                #data_iter = LMSimpleOrderedIterator(data, *args, **kwargs)
+                data_iter = LMSimpleOrderedIteratorTwoFiles(self.test_body, self.test_cand, *args, **kwargs)
             elif split == 'test':
                 data = self.test
-                #data_iter = LMSimpleOrderedIteratorTwoFiles(self.test_body, self.test_cand, *args, **kwargs)
-                data_iter = LMSimpleOrderedIterator(data, *args, **kwargs)
+                data_iter = LMSimpleOrderedIteratorTwoFiles(self.test_body, self.test_cand, *args, **kwargs)
+                #data_iter = LMSimpleOrderedIterator(data, *args, **kwargs)
 
         return data_iter
 

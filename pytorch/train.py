@@ -16,6 +16,33 @@ from mem_transformer import MemTransformerLM
 from utils.exp_utils import create_exp_dir
 from utils.data_parallel import BalancedDataParallel
 
+def get_mask(lens):
+  max_len = max(lens)
+  lens = torch.LongTensor(lens)
+  mask = torch.arange(max_len).expand(lens.size(0), max_len) < lens.unsqueeze(1)
+  return mask.float()
+
+def format_rank(loss_ranking, idx):
+  top_k = torch.topk(loss_ranking, 5, largest=False)
+  log = 'topk for batch {}: {}'.format(idx, top_k)
+  return log
+
+def get_rank(loss_ranking):
+  sort, idx = torch.sort(loss_ranking, descending=False)
+  real_target_position = (idx == 0).nonzero()
+  return real_target_position
+
+def get_rankings(ranking_positions):
+  rank_len = len(ranking_positions)
+  ranking_positions = np.array(ranking_positions)
+  r_0 = sum(ranking_positions < 1) / rank_len
+  r_5 = sum(ranking_positions < 5) / rank_len
+  r_10 = sum(ranking_positions < 10) / rank_len
+  return r_0, r_5, r_10
+
+def mean_with_lengths(data, lengths):
+  return torch.FloatTensor([sum(d) / l for d, l in zip(data, lengths)])
+
 parser = argparse.ArgumentParser(description='PyTorch Transformer Language Model')
 parser.add_argument('--data', type=str, default='../data/wikitext-103',
                     help='location of the data corpus')
@@ -185,7 +212,7 @@ corpus = get_lm_corpus(args.data, args.dataset)
 ntokens = len(corpus.vocab)
 args.n_token = ntokens
 
-eval_batch_size = 10
+eval_batch_size = 100
 tr_iter = corpus.get_iterator('train', args.batch_size, args.tgt_len,
     device=device, ext_len=args.ext_len)
 va_iter = corpus.get_iterator('valid', eval_batch_size, args.eval_tgt_len,
@@ -396,18 +423,50 @@ def evaluate(eval_iter):
         model.reset_length(args.eval_tgt_len,
             args.ext_len, args.mem_len+args.tgt_len-args.eval_tgt_len)
 
-    # Evaluation
     total_len, total_loss = 0, 0.
+    start_time = time.time()
+    memories = model.init_mems()
+    ranking_positions = []
     with torch.no_grad():
-        mems = tuple()
-        for i, (data, target, seq_len) in enumerate(eval_iter):
-            if args.max_eval_steps > 0 and i >= args.max_eval_steps:
-                break
-            ret = model(data, target, *model.init_mems())
-            loss, mems = ret[0], ret[1:]
-            loss = loss.mean()
-            total_loss += seq_len * loss.float().item()
-            total_len += seq_len
+      # mems = tuple()
+      for idx, (body_data, cand_data, body_target, cand_target, body_len, cand_len) in enumerate(eval_iter):
+        overall_len = [l + body_len for l in cand_len]
+        ret = model(body_data, body_target, *memories)
+        loss, mems = ret[0], ret[1:]
+        loss_body = loss.squeeze()
+        quasi_mean_body = mean_with_lengths(loss_body.unsqueeze(0).expand(100, -1), overall_len)
+        # expand mems 100 times on the batch dim
+        mems = [m.expand(-1, 100, -1) for m in mems]
+        ret = model(cand_data, cand_target, *mems)
+        loss, _ = ret[0], ret[1:]
+        # get batch first
+        loss = loss.t()
+        # mask padding
+        mask = get_mask(cand_len)
+        loss = loss * mask
+        # get loss for every sentence
+
+        loss_cand = mean_with_lengths(loss, overall_len)
+        loss_ranking = quasi_mean_body + loss_cand
+        # get ranking
+        print(format_rank(loss_ranking, idx))
+        real_target_position = get_rank(loss_ranking)
+        ranking_positions.append(real_target_position.item())
+
+        # if iteration % 20 == 0 print recalls till now
+        if idx % 1 == 0:
+          r_0, r_5, r_10 = get_rankings(ranking_positions)
+          print('R@1 = {}%, R@5 = {}%, R@10 = {}%'.format(r_0 * 100, r_5 * 100, r_10 * 100))
+
+        # get overall batch loss
+        loss = loss_ranking.mean()
+        print('losses: {:.2f}'.format(loss))
+        total_loss += sum(cand_len) * loss.item()
+        total_len += sum(cand_len)
+      print(ranking_positions)
+      total_time = time.time() - start_time
+    logging('Time : {:.2f}s, {:.2f}ms/segment'.format(
+      total_time, 1000 * total_time / (idx + 1)))
 
     # Switch back to the training mode
     model.reset_length(args.tgt_len, args.ext_len, args.mem_len)

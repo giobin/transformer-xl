@@ -6,6 +6,7 @@ import os, sys
 
 import torch
 import numpy as np
+import torch.nn.functional as F
 
 from data_utils_ranking import get_lm_corpus
 from mem_transformer import MemTransformerLM
@@ -102,6 +103,27 @@ def get_rankings(ranking_positions):
 def mean_with_lengths(data, lengths):
   return torch.FloatTensor([sum(d) / l for d, l in zip(data, lengths)])
 
+def generate(body_data, *mems, gen_len=20):
+
+  generated_sequence = body_data
+  memories = mems
+  for ix in range(gen_len):
+    ret = model.forward_generate(generated_sequence, *memories)
+    logits, memories = ret[0], ret[1:]
+
+    # get [B, last_token, logits] from [body_len, B, logits]
+    next_token_logits = logits[-1, 0, :]
+
+    # sample
+    sampler = torch.distributions.categorical.Categorical(logits=next_token_logits)
+    token = sampler.sample()
+    token = token.unsqueeze(dim=0).unsqueeze(dim=0)
+
+    # add predicted token to body
+    generated_sequence = torch.cat([generated_sequence, token], dim=0)
+
+  return generated_sequence
+
 def evaluate_2file_setup(eval_iter):
   # Turn on evaluation mode which disables dropout.
   model.eval()
@@ -117,9 +139,14 @@ def evaluate_2file_setup(eval_iter):
       loss, mems = ret[0], ret[1:]
       loss_body = loss.squeeze()
       quasi_mean_body = mean_with_lengths(loss_body.unsqueeze(0).expand(100, -1), overall_len)
+
+      # run generation from body (len_body, 1)
+      generated_sequence = generate(body_data, *mems)
+
       # expand mems 100 times on the batch dim
       mems = [m.expand(-1, 100, -1) for m in mems]
       ret = model(cand_data, cand_target, *mems)
+
       loss, _ = ret[0], ret[1:]
       # get batch first
       loss = loss.t()
@@ -189,7 +216,7 @@ elif args.split == 'valid':
     valid_loss = evaluate(va_iter)
     test_loss = None
 elif args.split == 'test':
-    test_loss = evaluate(te_iter)
+    test_loss = evaluate_2file_setup(te_iter)
     valid_loss = None
 
 def format_log(loss, split):
